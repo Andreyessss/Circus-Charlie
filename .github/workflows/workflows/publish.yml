@@ -1,0 +1,90 @@
+name: Publish to CETUS Gallery
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      
+    - name: Validate required files
+      run: |
+        echo "Validating project structure..."
+        
+        # Check for video
+        if [ ! -f "video/demo.mp4" ]; then
+          echo "❌ Error: video/demo.mp4 not found"
+          exit 1
+        fi
+        
+        # Check for cover
+        if [ ! -f "gallery/cover.png" ]; then
+          echo "❌ Error: gallery/cover.png not found"
+          exit 1
+        fi
+        
+        # Check for screenshots
+        screenshot_count=$(ls screenshots/*.png 2>/dev/null | wc -l)
+        if [ $screenshot_count -lt 3 ]; then
+          echo "❌ Error: At least 3 screenshots required, found $screenshot_count"
+          exit 1
+        fi
+        
+        # Check for executable
+        if [ ! -f "bin/CircusCharlie.exe" ]; then
+          echo "❌ Error: bin/CircusCharlie.exe not found"
+          exit 1
+        fi
+        
+        # Check for README
+        if [ ! -f "README.md" ]; then
+          echo "❌ Error: README.md not found"
+          exit 1
+        fi
+        
+        echo "✅ All required files present"
+    
+    - name: Create release package
+      run: |
+        echo "Creating release package..."
+        mkdir -p release
+        
+        # Copy executable and assets
+        cp -r bin release/
+        cp -r assets release/
+        
+        # Create ZIP
+        cd release
+        zip -r ../CircusCharlie.zip bin/ assets/
+        cd ..
+        
+        echo "✅ Package created"
+    
+    - name: Get version
+      id: version
+      run: |
+        VERSION="v1.0.${{ github.run_number }}"
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "📦 Version: $VERSION"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.VERSION }}
+        name: Release ${{ steps.version.outputs.VERSION }}
+        files: CircusCharlie.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Notify CETUS
+      run: |
+        echo "🎉 Release published successfully!"
+        echo "Project will be updated in CETUS gallery automatically"
