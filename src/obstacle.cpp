@@ -2,13 +2,12 @@
 
 Obstacle::Obstacle(float x, float y)
         : position(x, y),
-            radius(70.0f),
-            speed(-220.0f),
-            active(true),
-            type(Type::FIRE),
-            passed(false)
+          radius(70.0f),
+          speed(-220.0f),
+          active(true),
+          type(Type::FIRE),
+          passed(false)
 {
-    // Graphics
     shape.setRadius(radius);
     shape.setFillColor(sf::Color::Red);
     shape.setOutlineColor(sf::Color::Yellow);
@@ -21,7 +20,6 @@ Obstacle::~Obstacle() {
 }
 
 void Obstacle::update(float dt) {
-    // Move in pixels/sec
     position.x += speed * dt;
     shape.setPosition(position);
 }

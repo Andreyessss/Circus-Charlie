@@ -3,9 +3,8 @@
 Platform::Platform(float x, float y, float w, float h)
     : width(w), height(h)
 {
-    // Graphics only
     shape.setSize(sf::Vector2f(width, height));
-    shape.setFillColor(sf::Color(50,200,50)); // Green ground
+    shape.setFillColor(sf::Color(50,200,50));
     shape.setOutlineColor(sf::Color(40,160,40));
     shape.setOutlineThickness(1.0f);
     shape.setOrigin(sf::Vector2f(width / 2.0f, height / 2.0f));
@@ -24,6 +23,5 @@ sf::FloatRect Platform::getBounds() const {
 }
 
 float Platform::getTop() const {
-    // shape origin is centered
     return shape.getPosition().y - (shape.getSize().y / 2.0f);
 }
