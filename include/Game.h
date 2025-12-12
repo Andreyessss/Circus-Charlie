@@ -3,7 +3,6 @@
 
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
-#include <box2d/box2d.h>
 #include <memory>
 #include <vector>
 
@@ -30,11 +29,9 @@ private:
     int lives;
     float gameTime;
     
-    // Physics
-    std::unique_ptr<b2World> world;
+    // Timing / physics placeholders
     const float TIME_STEP = 1.0f / 60.0f;
-    const int VELOCITY_ITERATIONS = 8;
-    const int POSITION_ITERATIONS = 3;
+    // Removed Box2D world member
     
     // Objects
     std::unique_ptr<Player> player;
@@ -43,19 +40,43 @@ private:
     
     // Graphics
     sf::Font font;
+    sf::Font pixelFont;
+    // Background and textures
     sf::Texture backgroundTexture;
-    sf::Sprite backgroundSprite;
-    
-    // Audio
-    sf::Music music;
+    sf::RectangleShape backgroundShape;
+    sf::Texture charlieTexture;
+    sf::Texture hoopTexture;
+    sf::Texture fireTexture;
+    // Level goal
+    sf::RectangleShape goalShape;
+    bool goalReached;
+    sf::Texture goalTexture;
+    // Tower
+    sf::Texture towerTexture;
+    sf::RectangleShape towerShape;
+
+    // Level dimensions (world coordinates)
+    float levelWidth;
+    float levelLeft;
+    float levelRight;
+
+    // Audio buffers and active sounds
     sf::SoundBuffer jumpBuffer;
     sf::SoundBuffer hitBuffer;
-    sf::Sound jumpSound;
-    sf::Sound hitSound;
+    sf::Music music;
+    std::vector<sf::Sound> sounds;
     
     // Menu
     std::vector<sf::Text> menuOptions;
     int selectedOption;
+    std::unique_ptr<sf::Text> titleText;
+    std::unique_ptr<sf::Text> creditsText;
+    std::unique_ptr<sf::Text> optionPlayText;
+
+    // HUD
+    std::unique_ptr<sf::Text> hudLivesText;
+    std::unique_ptr<sf::Text> hudScoreText;
+    std::unique_ptr<sf::Text> messageText;
     
     // Timing
     sf::Clock clock;
@@ -84,6 +105,8 @@ private:
     void spawnObstacle();
     void checkCollisions();
     void loseLife();
+    void initResources();
+    void playSound(const sf::SoundBuffer& buf);
     
 public:
     Game();
@@ -91,7 +114,7 @@ public:
     
     void run();
     
-    b2World* getWorld() { return world.get(); }
+    // No physics world (Box2D removed)
     void addScore(int points) { score += points; }
 };
 
