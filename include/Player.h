@@ -33,7 +33,7 @@ public:
     void takeDamage();
     
     sf::Vector2f getPosition() const;
-    bool vulnerable() const { return !isInvulnerable; }
+    bool isProtected() const { return isInvulnerable; }  // ✅ CORREGIDO: nombre más claro
     void setCanJump(bool value) { canJump = value; }
 };
 
