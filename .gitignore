@@ -3,7 +3,6 @@
 *.obj
 
 # Executables
-*.exe
 *.out
 *.app
 
