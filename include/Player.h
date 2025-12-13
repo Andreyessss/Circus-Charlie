@@ -22,6 +22,7 @@ private:
     float climbSpeed;
     float prevY;
 public:
+        void setY(float y) { position.y = y; shape.setPosition(position); }
     Player(float x, float y);
     ~Player();
     void update(float dt);

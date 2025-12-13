@@ -55,6 +55,10 @@ sf::FloatRect Player::getBounds() const {
     return shape.getGlobalBounds();
 }
 
+sf::Vector2f Player::getPosition() const {
+    return position;
+}
+
 void Player::landOnPlatform(float platformTop) {
     float h = shape.getSize().y;
     position.y = platformTop - (h / 2.0f);

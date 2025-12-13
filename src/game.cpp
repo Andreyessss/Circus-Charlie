@@ -11,7 +11,7 @@
 #include <filesystem>
 
 void Game::initWindow() {
-    window.create(sf::VideoMode(800, 600), "Circus Charlie");
+    window.create(sf::VideoMode(sf::Vector2u(800, 600)), "Circus Charlie");
     window.setFramerateLimit(60);
     gameView = window.getView();
 }
@@ -25,7 +25,8 @@ void Game::initLevel() {
     platforms.emplace_back(std::make_unique<Platform>(levelWidth / 2.f, 560.f, levelWidth, 80.f));
     obstacles.clear();
     obstacleTimer = 0.f;
-    player->setTexture(&charlieTexture);
+    // Solo asignar la textura del jugador, nunca la de vidas
+    if (charlieTexture.getSize().x > 0) player->setTexture(&charlieTexture);
     obstacleTimer = 0.f;
     obstacleSpawnInterval = 2.0f;
     goalReached = false;
@@ -37,16 +38,24 @@ void Game::initLevel() {
         goalShape.setFillColor(sf::Color(50, 200, 50));
     }
     goalShape.setOrigin(goalShape.getSize() / 2.f);
-    goalShape.setPosition(sf::Vector2f(levelRight - 100.f, 500.f));
-    if (towerTexture.getSize().x > 0) {
-        towerShape.setSize(sf::Vector2f(static_cast<float>(towerTexture.getSize().x), static_cast<float>(towerTexture.getSize().y)));
-        towerShape.setTexture(&towerTexture);
-    } else {
-        towerShape.setSize(sf::Vector2f(120.f, 300.f));
-        towerShape.setFillColor(sf::Color(120, 80, 40));
-    }
+    // Meta al final del nivel
+    goalShape.setPosition(sf::Vector2f(levelRight - 60.f, 500.f));
+    // Solo una torre, bien posicionada
+    float charlieHeight = 80.f; // Ajusta según el sprite real
+    float charlieWidth = 40.f;
+    towerShape.setSize(sf::Vector2f(charlieWidth * 1.3f, charlieHeight * 1.2f));
+    // Torre con fondo transparente y borde visible
+    towerShape.setFillColor(sf::Color(120, 80, 40, 180));
+    towerShape.setOutlineThickness(3.f);
+    towerShape.setOutlineColor(sf::Color::Black);
     towerShape.setOrigin(towerShape.getSize() / 2.f);
-    towerShape.setPosition(sf::Vector2f(levelRight - 180.f, 500.f - (towerShape.getSize().y/2.f)));
+    float towerX = levelRight - 120.f;
+    float towerY = 500.f;
+    if (!platforms.empty()) {
+        float platformTop = platforms[0]->getTop();
+        towerY = platformTop - (towerShape.getSize().y / 2.f);
+    }
+    towerShape.setPosition(sf::Vector2f(towerX, towerY));
     if (backgroundTexture.getSize().x > 0) {
         backgroundTexture.setRepeated(true);
         backgroundShape.setSize(sf::Vector2f(levelWidth, static_cast<float>(window.getSize().y)));
@@ -77,16 +86,18 @@ void Game::run() {
 }
 
 void Game::handleEvents() {
-    sf::Event event;
-    while (window.pollEvent(event)) {
-        if (event.type == sf::Event::Closed) {
+    // Consume events for window/system events (SFML3 event API)
+    while (auto ev = window.pollEvent()) {
+        if (ev->is<sf::Event::Closed>()) {
             window.close();
             continue;
         }
-        if (event.type == sf::Event::KeyPressed) {
-            auto code = event.key.code;
+        if (ev->is<sf::Event::KeyPressed>()) {
+            const auto* kp = ev->getIf<sf::Event::KeyPressed>();
+            if (!kp) continue;
+            auto code = kp->code;
             if (currentState == GameState::MENU) {
-                if (code == sf::Keyboard::Space) {
+                if (code == sf::Keyboard::Key::Space) {
                     currentState = GameState::PLAYING;
                     score = 0; lives = 3;
                     initLevel();
@@ -94,19 +105,19 @@ void Game::handleEvents() {
                 continue;
             }
             if (currentState == GameState::GAME_OVER) {
-                if (code == sf::Keyboard::Space) {
+                if (code == sf::Keyboard::Key::Space) {
                     score = 0; lives = 3; goalReached = false;
                     initLevel();
                     currentState = GameState::PLAYING;
-                } else if (code == sf::Keyboard::Escape) {
+                } else if (code == sf::Keyboard::Key::Escape) {
                     window.close();
                 }
                 continue;
             }
-            if (code == sf::Keyboard::Left) player->moveLeft();
-            if (code == sf::Keyboard::Right) player->moveRight();
-            if (code == sf::Keyboard::Space) { if (!player->isClimbing()) { player->jump(); playSound(jumpBuffer); } else { player->stopClimb(); } }
-            if (code == sf::Keyboard::Up) {
+            if (code == sf::Keyboard::Key::Left) player->moveLeft();
+            if (code == sf::Keyboard::Key::Right) player->moveRight();
+            if (code == sf::Keyboard::Key::Space) { if (!player->isClimbing()) { player->jump(); playSound(jumpBuffer); } else { player->stopClimb(); } }
+            if (code == sf::Keyboard::Key::Up) {
                 if (!player->isClimbing()) {
                     float towerX = towerShape.getPosition().x;
                     if (std::abs(player->getPosition().x - towerX) < 40.f) {
@@ -115,15 +126,75 @@ void Game::handleEvents() {
                 }
             }
         }
-        if (event.type == sf::Event::KeyReleased) {
-            auto code = event.key.code;
-            if (code == sf::Keyboard::Left || code == sf::Keyboard::Right) player->stop();
+        if (ev->is<sf::Event::KeyReleased>()) {
+            const auto* kr = ev->getIf<sf::Event::KeyReleased>();
+            if (!kr) continue;
+            auto code = kr->code;
+            if (code == sf::Keyboard::Key::Left || code == sf::Keyboard::Key::Right) player->stop();
+        }
+    }
+
+    // Keyboard-driven input (polling) for portability with SFML3
+    if (currentState == GameState::MENU) {
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Space)) {
+            currentState = GameState::PLAYING;
+            score = 0; lives = 3;
+            initLevel();
+        }
+        return;
+    }
+    if (currentState == GameState::GAME_OVER) {
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Space)) {
+            score = 0; lives = 3; goalReached = false;
+            initLevel();
+            currentState = GameState::PLAYING;
+        } else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape)) {
+            window.close();
+        }
+        return;
+    }
+
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Left)) player->moveLeft();
+    else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Right)) player->moveRight();
+    else player->stop();
+
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Space)) {
+        if (player && !player->isClimbing()) { player->jump(); playSound(jumpBuffer); }
+        else if (player) { player->stopClimb(); }
+    }
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Up)) {
+        if (player && !player->isClimbing()) {
+            float towerX = towerShape.getPosition().x;
+            if (std::abs(player->getPosition().x - towerX) < 40.f) {
+                player->startClimb(towerX);
+            }
         }
     }
 }
 
 void Game::update(float dt) {
-    if (currentState == GameState::PLAYING) updateGame(dt);
+    // No actualizar nada en el menú ni después de llegar a la meta
+    if (currentState != GameState::PLAYING) return;
+    static bool subiendoTorre = false;
+    static float climbY = 0.f;
+    if (goalReached && player && !subiendoTorre) {
+        // Inicia animación
+        subiendoTorre = true;
+        climbY = player->getPosition().y;
+    }
+    if (subiendoTorre && player) {
+        float targetY = towerShape.getPosition().y - towerShape.getSize().y / 2.f;
+        if (climbY > targetY) {
+            climbY -= 100.f * dt; // Velocidad de subida
+            if (climbY < targetY) climbY = targetY;
+            player->setY(climbY);
+        } else {
+            subiendoTorre = false;
+        }
+        return;
+    }
+    if (goalReached) return;
+    updateGame(dt);
 }
 
 void Game::updateGame(float dt) {
@@ -167,7 +238,6 @@ void Game::updateGame(float dt) {
 void Game::render() {
     if (currentState == GameState::MENU) {
         renderMenu();
-        window.display();
         return;
     }
     if (player) {
@@ -184,11 +254,21 @@ void Game::render() {
     if (currentState == GameState::GAME_OVER) {
         window.setView(window.getDefaultView());
         if (font.getInfo().family != "") {
-            if (goalReached) messageText->setString("LEVEL COMPLETE!"); else messageText->setString("GAME OVER");
+            if (goalReached) messageText->setString("JUEGO COMPLETADO");
+            else messageText->setString("JUEGO TERMINADO");
             float px = static_cast<float>(window.getSize().x)/2.f - 150.f;
             float py = static_cast<float>(window.getSize().y)/2.f - 20.f;
             messageText->setPosition(sf::Vector2f(px, py));
             window.draw(*messageText);
+            // Opciones de fin de juego
+            sf::Text opcionSalir(font, "Salir (ESC)", 16);
+            opcionSalir.setFillColor(sf::Color::White);
+            opcionSalir.setPosition(sf::Vector2f(px, py + 60.f));
+            window.draw(opcionSalir);
+            sf::Text opcionRepetir(font, "Repetir nivel (ESPACIO)", 16);
+            opcionRepetir.setFillColor(sf::Color::White);
+            opcionRepetir.setPosition(sf::Vector2f(px, py + 100.f));
+            window.draw(opcionRepetir);
         }
         window.setView(gameView);
     }
@@ -261,7 +341,7 @@ void Game::initResources() {
         const std::vector<std::string> musicCandidates = {"assets/music.ogg", "assets/music.wav"};
         bool ok = false;
         for (auto &mfile : musicCandidates) {
-            if (music.openFromFile(mfile)) { music.setLoop(true); music.play(); ok = true; break; }
+            if (music.openFromFile(mfile)) { music.setLooping(true); music.play(); ok = true; break; }
         }
         if (!ok) std::cerr << "No background music found (tried music.ogg, music.wav)" << std::endl;
     }
@@ -322,35 +402,39 @@ void Game::initResources() {
         groundHasTexture = true;
     }
     bool hasFont = false;
-    if (font.loadFromFile("assets/font.ttf")) hasFont = true;
-    else if (font.loadFromFile("C:/Windows/Fonts/arial.ttf")) hasFont = true;
-    else std::cerr << "Warning: no font found (assets/font.ttf or C:/Windows/Fonts/arial.ttf)" << std::endl;
-    bool hasPixel = false;
-    if (pixelFont.loadFromFile("assets/pixel_font.ttf")) {
-        hasPixel = true;
+    if (font.openFromFile("assets/PressStart2P-Regular.ttf")) {
+        hasFont = true;
+        pixelFont = font;
+        std::cerr << "[DEBUG] Fuente pixel cargada correctamente: PressStart2P-Regular.ttf" << std::endl;
+    } else {
+        std::cerr << "[ERROR] No se pudo cargar la fuente pixel (PressStart2P-Regular.ttf). El juego se cerrará." << std::endl;
+        std::exit(1);
     }
-    if (hasFont) {
-        if (hasPixel) titleText = std::make_unique<sf::Text>(pixelFont, "Circus Charlie x Clash Royale", 72);
-        else titleText = std::make_unique<sf::Text>(font, "Circus Charlie x Clash Royale", 72);
-        titleText->setFillColor(sf::Color::Yellow);
-        creditsText = std::make_unique<sf::Text>(font, "By Ceti 2025\nPor: Josue Emir Gonzalez Plascencia y Andre Reyes Perez", 14);
-        creditsText->setFillColor(sf::Color::White);
-        optionPlayText = std::make_unique<sf::Text>(font, "Play (1 Player)", 24);
-        optionPlayText->setFillColor(sf::Color::White);
-        hudLivesText = std::make_unique<sf::Text>(font, "", 18);
-        hudLivesText->setFillColor(sf::Color::White);
-        hudScoreText = std::make_unique<sf::Text>(font, "", 18);
-        hudScoreText->setFillColor(sf::Color::White);
-        messageText = std::make_unique<sf::Text>(font, "", 28);
-        messageText->setFillColor(sf::Color::Yellow);
+    // Forzar uso de la fuente pixel en todos los textos
+    titleText = std::make_unique<sf::Text>(font, "Circus Charlie x Clash Royale", 22); // tamaño más chico
+    creditsText = std::make_unique<sf::Text>(font, "By Ceti 2025\nPor: Josue Emir Gonzalez Plascencia y Andre Reyes Perez", 8);
+    optionPlayText = std::make_unique<sf::Text>(font, "Play (1 Player)", 12);
+    titleText->setFillColor(sf::Color::Yellow);
+    creditsText->setFillColor(sf::Color::White);
+    optionPlayText->setFillColor(sf::Color::White);
+    hudLivesText = std::make_unique<sf::Text>(font, "", 10);
+    hudLivesText->setFillColor(sf::Color::White);
+    hudScoreText = std::make_unique<sf::Text>(font, "", 10);
+    hudScoreText->setFillColor(sf::Color::White);
+    messageText = std::make_unique<sf::Text>(font, "", 14);
+    messageText->setFillColor(sf::Color::Yellow);
+    if (titleText) {
+        auto b = titleText->getLocalBounds();
+        titleText->setOrigin(sf::Vector2f(b.position.x + b.size.x/2.f, b.position.y + b.size.y/2.f));
     }
 }
 
 void Game::playSound(const sf::SoundBuffer& buf) {
-    sounds.emplace_back();
-    sounds.back().setBuffer(buf);
+    // SFML3: construct sound with buffer
+    sounds.emplace_back(buf);
     sounds.back().play();
-    sounds.erase(std::remove_if(sounds.begin(), sounds.end(), [](const sf::Sound& s){ return s.getStatus() == sf::Sound::Stopped; }), sounds.end());
+    // cleanup stopped sounds (use Status enum)
+    sounds.erase(std::remove_if(sounds.begin(), sounds.end(), [](const sf::Sound& s){ return s.getStatus() == sf::Sound::Status::Stopped; }), sounds.end());
 }
 
 void Game::loseLife() {
@@ -360,6 +444,9 @@ void Game::loseLife() {
     if (lives <= 0) {
         currentState = GameState::GAME_OVER;
         std::cerr << "GAME OVER: no lives left" << std::endl;
+    } else {
+        // Reiniciar el nivel pero mantener las vidas restantes
+        initLevel();
     }
 }
 
@@ -410,9 +497,12 @@ void Game::renderMenu() {
     window.clear(sf::Color::Black);
     if ((font.getInfo().family != "" || pixelFont.getInfo().family != "") && titleText && creditsText && optionPlayText) {
         sf::Text &t = *titleText;
-        auto b = t.getLocalBounds();
-        t.setOrigin(sf::Vector2f(b.left + b.width/2.f, b.top + b.height/2.f));
-        t.setPosition(sf::Vector2f(static_cast<float>(window.getSize().x)/2.f, 80.f));
+        t.setCharacterSize(22); // Título más pequeño
+        t.setOrigin(sf::Vector2f(0.f, 0.f));
+        t.setPosition(sf::Vector2f(
+            (window.getSize().x - t.getCharacterSize() * t.getString().getSize()) / 2.f,
+            80.f
+        ));
         window.draw(t);
         creditsText->setPosition(sf::Vector2f(40.f, 140.f));
         window.draw(*creditsText);
@@ -441,10 +531,23 @@ void Game::renderHUD() {
         ornament.setPosition(sf::Vector2f(scoreText.getPosition().x - 30.f, 6.f));
         window.draw(ornament);
         window.draw(scoreText);
+        // Mostrar texto "Lives:"
         if (hudLivesText) {
-            hudLivesText->setString(std::string("Lives: ") + std::to_string(lives));
+            hudLivesText->setString("Lives:");
             hudLivesText->setPosition(sf::Vector2f(10.f, 10.f));
             window.draw(*hudLivesText);
+        }
+        // Dibujar iconos de vidas
+        float iconX = 80.f;
+        float iconY = 8.f;
+        for (int i = 0; i < lives; ++i) {
+            sf::Sprite lifeIcon(lifesTexture);
+            // Escala automática para que el alto sea 24px
+            float scale = 1.f;
+            if (lifesTexture.getSize().y > 0) scale = 24.f / lifesTexture.getSize().y;
+            lifeIcon.setScale(sf::Vector2f(scale, scale));
+            lifeIcon.setPosition(sf::Vector2f(iconX + i * (24.f + 8.f), iconY));
+            window.draw(lifeIcon);
         }
     } else if (font.getInfo().family != "") {
         if (hudLivesText) {
@@ -462,14 +565,22 @@ void Game::renderHUD() {
 }
 
 void Game::renderGame() {
+    // Fondo se repite a lo largo de todo el nivel
     if (backgroundTexture.getSize().x > 0) {
+        float fondoWidth = levelWidth;
+        backgroundShape.setTextureRect(sf::IntRect(sf::Vector2i(0, 0), sf::Vector2i(static_cast<int>(fondoWidth), static_cast<int>(window.getSize().y))));
+        backgroundShape.setSize(sf::Vector2f(fondoWidth, static_cast<float>(window.getSize().y)));
+        backgroundShape.setPosition(sf::Vector2f(levelLeft, 0.f));
         window.draw(backgroundShape);
     } else {
         sf::RectangleShape sky(sf::Vector2f(static_cast<float>(window.getSize().x), static_cast<float>(window.getSize().y)));
         sky.setFillColor(sf::Color(100, 149, 237));
-        sky.setPosition(sf::Vector2f(levelLeft, 0.f));
+        sky.setPosition(sf::Vector2f(0.f, 0.f));
         window.draw(sky);
     }
     window.draw(towerShape);
-    window.draw(goalShape);
+    // La meta solo desaparece si se ha llegado
+    if (!goalReached) {
+        window.draw(goalShape);
+    }
 }

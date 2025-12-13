@@ -18,6 +18,7 @@ enum class GameState {
 };
 
 class Game {
+    sf::Texture lifesTexture;
 private:
     sf::RenderWindow window;
     sf::View gameView;
