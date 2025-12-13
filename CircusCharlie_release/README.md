@@ -62,6 +62,7 @@ Assets usados: listar en `assets/` (respetar licencias)
 - Hice una copia de seguridad de las fuentes originales con comentarios en `.backup_sources/`.
 - Moví archivos no referenciados a `assets/unused/` para seguridad antes de limpiar.
 
+Si quieres que haga el push al repositorio remoto o que genere el Release ZIP para CETUS, dime y lo preparo (necesitarás ejecutar el commit y push localmente o autorizar al CI).
 
 ---
 Versión: entrega Proyecto 252 — estructura y README actualizados.
