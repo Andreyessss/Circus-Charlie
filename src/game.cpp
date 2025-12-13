@@ -10,6 +10,8 @@
 #include <fstream>
 #include <filesystem>
 
+#include <SFML/Audio/SoundSource.hpp>
+
 void Game::initWindow() {
     window.create(sf::VideoMode(sf::Vector2u(800, 600)), "Circus Charlie");
     window.setFramerateLimit(60);
@@ -28,7 +30,7 @@ void Game::initLevel() {
     // Solo asignar la textura del jugador, nunca la de vidas
     if (charlieTexture.getSize().x > 0) player->setTexture(&charlieTexture);
     obstacleTimer = 0.f;
-    obstacleSpawnInterval = 2.0f;
+    obstacleSpawnInterval = 1.6f; // Menos obstáculos para facilitar avanzar
     goalReached = false;
     if (goalTexture.getSize().x > 0) {
         goalShape.setSize(sf::Vector2f(static_cast<float>(goalTexture.getSize().x), static_cast<float>(goalTexture.getSize().y)));
@@ -40,22 +42,51 @@ void Game::initLevel() {
     goalShape.setOrigin(goalShape.getSize() / 2.f);
     // Meta al final del nivel
     goalShape.setPosition(sf::Vector2f(levelRight - 60.f, 500.f));
-    // Solo una torre, bien posicionada
+    // Solo una torre, mucho más pequeña (solicitado)
     float charlieHeight = 80.f; // Ajusta según el sprite real
     float charlieWidth = 40.f;
-    towerShape.setSize(sf::Vector2f(charlieWidth * 1.3f, charlieHeight * 1.2f));
+    // Ajustar la torre para que sea del tamaño de Charlie; si tenemos al jugador, usar sus dimensiones
+    if (player) {
+        float pw = player->getRight() - player->getLeft();
+        float ph = player->getBottom() - player->getTop();
+        towerShape.setSize(sf::Vector2f(pw, ph));
+    } else {
+        towerShape.setSize(sf::Vector2f(charlieWidth * 0.9f, charlieHeight * 0.9f));
+    }
     // Torre con fondo transparente y borde visible
     towerShape.setFillColor(sf::Color(120, 80, 40, 180));
     towerShape.setOutlineThickness(3.f);
     towerShape.setOutlineColor(sf::Color::Black);
     towerShape.setOrigin(towerShape.getSize() / 2.f);
-    float towerX = levelRight - 120.f;
+    // Colocar torre al final del nivel y al nivel del piso/ plataforma
+    // Asegurar textura no repetida para evitar que parezca duplicada
+    if (towerTexture.getSize().x > 0) {
+        try { towerTexture.setRepeated(false); } catch(...) {}
+    }
+    // Tamaño final: pequeño, aproximadamente 60% del tamaño de Charlie (visible pero discreto)
+    float tw = charlieWidth * 0.6f;
+    float th = charlieHeight * 0.6f;
+    if (player) {
+        float pw = player->getRight() - player->getLeft();
+        float ph = player->getBottom() - player->getTop();
+        tw = pw * 0.6f; th = ph * 0.6f;
+    }
+    towerShape.setSize(sf::Vector2f(tw, th));
+    towerShape.setOrigin(towerShape.getSize() / 2.f);
+    float towerX = levelRight - 60.f - (towerShape.getSize().x / 2.f) - 10.f;
     float towerY = 500.f;
     if (!platforms.empty()) {
         float platformTop = platforms[0]->getTop();
         towerY = platformTop - (towerShape.getSize().y / 2.f);
     }
     towerShape.setPosition(sf::Vector2f(towerX, towerY));
+    // Aplicar textura sin repetir y ajustar origen
+    if (towerTexture.getSize().x > 0) {
+        towerShape.setTexture(&towerTexture);
+        try {
+            towerShape.setTextureRect(sf::IntRect(sf::Vector2i(0,0), sf::Vector2i(static_cast<int>(towerShape.getSize().x), static_cast<int>(towerShape.getSize().y))));
+        } catch(...) {}
+    }
     if (backgroundTexture.getSize().x > 0) {
         backgroundTexture.setRepeated(true);
         backgroundShape.setSize(sf::Vector2f(levelWidth, static_cast<float>(window.getSize().y)));
@@ -67,20 +98,48 @@ void Game::initLevel() {
 }
 
 Game::Game() : currentState(GameState::MENU), score(0), lives(3), gameTime(0.f) {
+    std::cerr << "[DEBUG] Constructor Game: Estado inicial MENU" << std::endl;
     initWindow();
     initResources();
     std::srand(static_cast<unsigned>(std::time(nullptr)));
-    initLevel();
+    // No llamar a initLevel() aquí, solo cuando se presione espacio en el menú
+    std::cerr << "[DEBUG] Listo para mostrar menú principal" << std::endl;
 }
 
 Game::~Game() {}
 
 void Game::run() {
     sf::Clock clk;
+    GameState lastState = currentState;
+    // Asegurar música de menú al arrancar si estamos en MENU
+    if (currentState == GameState::MENU && menuMusic.getStatus() != sf::Sound::Status::Playing) {
+        std::cerr << "[DEBUG] Iniciando menuMusic al arrancar" << std::endl;
+        menuMusic.play();
+    }
     while (window.isOpen()) {
         float dt = clk.restart().asSeconds();
         handleEvents();
         update(dt);
+        // Cambiar música según el estado
+        if (currentState != lastState) {
+            if (currentState == GameState::MENU) {
+                if (levelMusic.getStatus() == sf::Sound::Status::Playing) levelMusic.stop();
+                if (menuMusic.getStatus() != sf::Sound::Status::Playing) {
+                    std::cerr << "[DEBUG] Llamando a menuMusic.play()" << std::endl;
+                    menuMusic.play();
+                }
+            } else if (currentState == GameState::PLAYING) {
+                if (menuMusic.getStatus() == sf::Sound::Status::Playing) {
+                    std::cerr << "[DEBUG] Deteniendo menuMusic" << std::endl;
+                    menuMusic.stop();
+                }
+                if (levelMusic.getStatus() != sf::Sound::Status::Playing) levelMusic.play();
+            } else {
+                menuMusic.stop();
+                levelMusic.stop();
+            }
+            lastState = currentState;
+        }
         render();
     }
 }
@@ -116,7 +175,18 @@ void Game::handleEvents() {
             }
             if (code == sf::Keyboard::Key::Left) player->moveLeft();
             if (code == sf::Keyboard::Key::Right) player->moveRight();
-            if (code == sf::Keyboard::Key::Space) { if (!player->isClimbing()) { player->jump(); playSound(jumpBuffer); } else { player->stopClimb(); } }
+            if (code == sf::Keyboard::Key::Space) {
+                std::cerr << "[DEBUG] Evento SPACE detectado" << std::endl;
+                if (!player->isClimbing()) {
+                    std::cerr << "[DEBUG] player->isClimbing() == false, ejecutando salto y sonido" << std::endl;
+                    player->jump();
+                    std::cerr << "[DEBUG] Reproduciendo jumpSound al saltar" << std::endl;
+                    try { if (jumpSound) { jumpSound->stop(); jumpSound->play(); } } catch(...) {}
+                } else {
+                    std::cerr << "[DEBUG] player->isClimbing() == true, no se reproduce sonido de salto" << std::endl;
+                    player->stopClimb();
+                }
+            }
             if (code == sf::Keyboard::Key::Up) {
                 if (!player->isClimbing()) {
                     float towerX = towerShape.getPosition().x;
@@ -159,7 +229,7 @@ void Game::handleEvents() {
     else player->stop();
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Space)) {
-        if (player && !player->isClimbing()) { player->jump(); playSound(jumpBuffer); }
+        if (player && !player->isClimbing()) { player->jump(); try { if (jumpSound) { jumpSound->stop(); jumpSound->play(); } } catch(...) {} }
         else if (player) { player->stopClimb(); }
     }
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Up)) {
@@ -214,7 +284,9 @@ void Game::updateGame(float dt) {
             float playerBottom = player->getBottom();
             float platformTop = plat->getTop();
             if (playerBottom >= platformTop && playerBottom <= platformTop + 40.0f) {
-                player->landOnPlatform(platformTop);
+                    player->landOnPlatform(platformTop);
+                    // Al aterrizar, detener el sonido de salto si está sonando
+                    try { if (jumpSound && jumpSound->getStatus() == sf::Sound::Status::Playing) jumpSound->stop(); } catch(...) {}
                 break;
             }
         }
@@ -229,12 +301,7 @@ void Game::updateGame(float dt) {
     checkCollisions();
     static float debugTimer = 0.f;
     debugTimer += dt;
-    if (debugTimer >= 1.0f) {
-        debugTimer = 0.f;
-        if (player) std::cerr << "DEBUG: player.y=" << player->getPosition().y << " obstacles=" << obstacles.size() << std::endl;
-    }
 }
-
 void Game::render() {
     if (currentState == GameState::MENU) {
         renderMenu();
@@ -285,17 +352,33 @@ void Game::spawnObstacle() {
     float maxY = 420.f;
     float y = minY + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (maxY - minY));
     auto ob = std::make_unique<Obstacle>(spawnX, y);
-    if (std::rand() % 2 == 0) {
-        ob->setTexture(&hoopTexture);
-        float r = 80.f + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (60.f));
-        ob->setRadius(r);
-        ob->setTypeHoop();
-    } else {
+    // 90% probabilidad de aro de fuego (hacerlos grandes y con desplazamiento vertical aleatorio)
+    if (std::rand() % 10 < 4) {
+        // Aros de fuego (menos probables que antes), tamaño moderado
+        float yOffset = -30.f + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (60.f)); // -30..+30
+        float finalY = y + yOffset;
+        ob = std::make_unique<Obstacle>(spawnX, finalY);
         ob->setTexture(&fireTexture);
-        float r = 40.f + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (50.f));
+        float r = 100.f + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (40.f)); // 100..140
         ob->setRadius(r);
         ob->setTypeFire();
+    } else {
+        // Aros (hoops) más grandes para que se note el paso por en medio
+        float yOffset = -30.f + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (60.f)); // -30..+30
+        float finalY = y + yOffset;
+        ob = std::make_unique<Obstacle>(spawnX, finalY);
+        ob->setTexture(&hoopTexture);
+        float r = 140.f + static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) / (120.f)); // 140..260
+        ob->setRadius(r);
+        ob->setTypeHoop();
     }
+            // Verificar si la música se está reproduciendo correctamente
+            if (currentState == GameState::MENU && menuMusic.getStatus() != sf::Sound::Status::Playing) {
+                std::cerr << "No se puede reproducir menu.wav o el archivo está dañado/formato no soportado." << std::endl;
+            }
+            if (currentState == GameState::PLAYING && levelMusic.getStatus() != sf::Sound::Status::Playing) {
+                std::cerr << "No se puede reproducir level.wav o el archivo está dañado/formato no soportado." << std::endl;
+            }
     obstacles.emplace_back(std::move(ob));
 }
 
@@ -305,7 +388,7 @@ void Game::initResources() {
     } catch (...) {
     }
     {
-        const std::vector<std::string> bgCandidates = {"assets/background.png", "assets/fondo_nivel1.png", "assets/fondo_menu.png"};
+        const std::vector<std::string> bgCandidates = {"assets/textures/background.png", "assets/textures/fondo_nivel1.png", "assets/textures/fondo_menu.png"};
         bool loaded = false;
         for (auto &p : bgCandidates) {
             if (backgroundTexture.loadFromFile(p)) {
@@ -319,36 +402,65 @@ void Game::initResources() {
         }
     }
     {
-        const std::vector<std::string> playerCandidates = {"assets/charlie.png", "assets/mono.png"};
+        const std::vector<std::string> playerCandidates = {"assets/textures/charlie.png", "assets/textures/mono.png"};
         bool ok = false;
         for (auto &p : playerCandidates) if (charlieTexture.loadFromFile(p)) { ok = true; break; }
         if (!ok) std::cerr << "Failed to load player texture (tried charlie.png, mono.png)" << std::endl;
     }
     {
         if (hoopTexture.getSize().x == 0) {
-            if (hoopTexture.loadFromFile("assets/hoop.png")) {}
-            else if (hoopTexture.loadFromFile("assets/aro_fuego.png")) {}
+            if (hoopTexture.loadFromFile("assets/textures/hoop.png")) {}
+            else if (hoopTexture.loadFromFile("assets/textures/aro_fuego.png")) {}
         }
         if (fireTexture.getSize().x == 0) {
-            if (fireTexture.loadFromFile("assets/fire.png")) {}
-            else if (fireTexture.loadFromFile("assets/aro_fuego.png")) {}
-            else if (fireTexture.loadFromFile("assets/mono.png")) {}
+            if (fireTexture.loadFromFile("assets/textures/fire.png")) {}
+            else if (fireTexture.loadFromFile("assets/textures/aro_fuego.png")) {}
+            else if (fireTexture.loadFromFile("assets/textures/mono.png")) {}
         }
         if (hoopTexture.getSize().x == 0) std::cerr << "Hoop texture not found (tried hoop.png, aro_fuego.png)" << std::endl;
         if (fireTexture.getSize().x == 0) std::cerr << "Fire texture not found (tried fire.png, aro_fuego.png, mono.png)" << std::endl;
     }
-    {
-        const std::vector<std::string> musicCandidates = {"assets/music.ogg", "assets/music.wav"};
-        bool ok = false;
-        for (auto &mfile : musicCandidates) {
-            if (music.openFromFile(mfile)) { music.setLooping(true); music.play(); ok = true; break; }
-        }
-        if (!ok) std::cerr << "No background music found (tried music.ogg, music.wav)" << std::endl;
+    // Cargar música de menú
+    if (!menuMusic.openFromFile("assets/sounds/menu.ogg")) {
+        std::cerr << "No se pudo cargar assets/sounds/menu.ogg" << std::endl;
+    } else {
+        menuMusic.setLooping(true);
+        menuMusic.setVolume(100.f);
     }
-    if (!jumpBuffer.loadFromFile("assets/jump.wav")) std::cerr << "Jump sound not found (assets/jump.wav)" << std::endl;
-    if (!hitBuffer.loadFromFile("assets/hit.wav")) std::cerr << "Hit sound not found (assets/hit.wav)" << std::endl;
-    if (!goalTexture.loadFromFile("assets/meta.png")) {
-        std::cerr << "Goal image assets/meta.png not found" << std::endl;
+    // Cargar música de nivel
+    if (!levelMusic.openFromFile("assets/sounds/level.ogg")) {
+        std::cerr << "No se pudo cargar assets/sounds/level.ogg" << std::endl;
+    } else {
+        levelMusic.setLooping(true);
+        // Mantener música de fondo más baja para no enmascarar efectos
+        levelMusic.setVolume(30.f);
+    }
+    // Intentar .ogg primero (preferir el archivo original), si falla intentar .wav
+    if (!jumpBuffer.loadFromFile("assets/sounds/jump.ogg")) {
+        if (!jumpBuffer.loadFromFile("assets/sounds/jump.wav")) std::cerr << "Jump sound not found (assets/sounds/jump.ogg or assets/sounds/jump.wav)" << std::endl;
+        else std::cerr << "Loaded jump.wav fallback, duration: " << jumpBuffer.getDuration().asSeconds() << "s" << std::endl;
+    } else {
+        std::cerr << "Loaded jump.ogg, duration: " << jumpBuffer.getDuration().asSeconds() << "s" << std::endl;
+    }
+    // Asociar el buffer al sonido de salto para poder controlarlo (play/stop)
+    try {
+        jumpSound = std::make_unique<sf::Sound>(jumpBuffer);
+        jumpSound->setVolume(100.f);
+        // Hacer el sonido relativo al listener para que siempre sea audible independientemente de la posición
+        jumpSound->setRelativeToListener(true);
+        jumpSound->setPosition(sf::Vector3f(0.f,0.f,0.f));
+        jumpSound->setMinDistance(1.f);
+        jumpSound->setAttenuation(0.f);
+    } catch(...) { jumpSound.reset(); }
+    // Asegurar volumen global y listener para reproducción clara
+    try { sf::Listener::setGlobalVolume(100.f); } catch(...) {}
+    if (!hitBuffer.loadFromFile("assets/sounds/hit.wav")) std::cerr << "Hit sound not found (assets/sounds/hit.wav)" << std::endl;
+    if (!goalTexture.loadFromFile("assets/textures/meta.png")) {
+        std::cerr << "Goal image assets/textures/meta.png not found" << std::endl;
+    }
+    // Cargar textura de vidas
+    if (!lifesTexture.loadFromFile("assets/textures/lifes.png")) {
+        std::cerr << "Life icon image assets/textures/lifes.png not found" << std::endl;
     }
     auto ensureDir = [&](const std::string &p){ try { std::filesystem::create_directories(std::filesystem::path(p).parent_path()); } catch(...) {} };
     auto writeLE32 = [&](std::ofstream &ofs, uint32_t v){ ofs.put(static_cast<char>(v & 0xFF)); ofs.put(static_cast<char>((v>>8)&0xFF)); ofs.put(static_cast<char>((v>>16)&0xFF)); ofs.put(static_cast<char>((v>>24)&0xFF)); };
@@ -386,23 +498,23 @@ void Game::initResources() {
             std::cerr << "Exception writing WAV placeholder: " << path << std::endl;
         }
     };
-    ensureWavFile("assets/music.wav", 3);
-    ensureWavFile("assets/jump.wav", 1);
-    ensureWavFile("assets/hit.wav", 1);
+    ensureWavFile("assets/sounds/music.wav", 3);
+    ensureWavFile("assets/sounds/jump.wav", 1);
+    ensureWavFile("assets/sounds/hit.wav", 1);
     if (towerTexture.getSize().x == 0) {
-        if (towerTexture.loadFromFile("assets/tower.png")) {}
-        else if (towerTexture.loadFromFile("assets/meta.png")) {}
-        else if (towerTexture.loadFromFile("assets/mono.png")) {}
+        if (towerTexture.loadFromFile("assets/textures/tower.png")) {}
+        else if (towerTexture.loadFromFile("assets/textures/meta.png")) {}
+        else if (towerTexture.loadFromFile("assets/textures/mono.png")) {}
         else std::cerr << "Tower image not found (tried tower.png, meta.png, mono.png)" << std::endl;
     }
     sf::Texture groundTexture;
     bool groundHasTexture = false;
-    if (groundTexture.loadFromFile("assets/ground.png")) {
+    if (groundTexture.loadFromFile("assets/textures/ground.png")) {
         groundTexture.setRepeated(true);
         groundHasTexture = true;
     }
     bool hasFont = false;
-    if (font.openFromFile("assets/PressStart2P-Regular.ttf")) {
+    if (font.openFromFile("assets/fonts/PressStart2P-Regular.ttf")) {
         hasFont = true;
         pixelFont = font;
         std::cerr << "[DEBUG] Fuente pixel cargada correctamente: PressStart2P-Regular.ttf" << std::endl;
@@ -430,11 +542,42 @@ void Game::initResources() {
 }
 
 void Game::playSound(const sf::SoundBuffer& buf) {
-    // SFML3: construct sound with buffer
-    sounds.emplace_back(buf);
-    sounds.back().play();
-    // cleanup stopped sounds (use Status enum)
+    // Cleanup stopped sounds first to avoid unbounded growth
     sounds.erase(std::remove_if(sounds.begin(), sounds.end(), [](const sf::Sound& s){ return s.getStatus() == sf::Sound::Status::Stopped; }), sounds.end());
+    // Limit active sounds to a reasonable number
+    const size_t MAX_ACTIVE_SOUNDS = 16;
+    if (sounds.size() >= MAX_ACTIVE_SOUNDS) {
+        // drop the oldest stopped or, if none, the oldest sound
+        auto it = std::find_if(sounds.begin(), sounds.end(), [](const sf::Sound& s){ return s.getStatus() == sf::Sound::Status::Stopped; });
+        if (it != sounds.end()) sounds.erase(it);
+        else sounds.erase(sounds.begin());
+    }
+    // Construct and configure new sound
+    sounds.emplace_back(buf);
+    sf::Sound &s = sounds.back();
+    s.setVolume(100.f);
+    try {
+        s.setRelativeToListener(false);
+        s.setPosition(sf::Vector3f(0.f, 0.f, 0.f));
+        s.setMinDistance(1.f);
+        s.setAttenuation(0.f);
+    } catch(...) {}
+    // Force listener defaults and play
+    try {
+        sf::Listener::setPosition(sf::Vector3f(0.f,0.f,0.f));
+        sf::Listener::setDirection(sf::Vector3f(0.f,0.f,-1.f));
+        sf::Listener::setGlobalVolume(100.f);
+    } catch(...) {}
+    s.play();
+    auto st = s.getStatus();
+    std::cerr << "[DEBUG] Intentando reproducir sonido (buffer): " << (buf.getDuration().asSeconds()) << " segundos; status=" << static_cast<int>(st) << std::endl;
+    // Depuración: mostrar cuando se intenta reproducir música
+    if (currentState == GameState::MENU) {
+        std::cerr << "[DEBUG] Intentando reproducir música de menú. Volumen: " << menuMusic.getVolume() << std::endl;
+    }
+    if (currentState == GameState::PLAYING) {
+        std::cerr << "[DEBUG] Intentando reproducir música de nivel. Volumen: " << levelMusic.getVolume() << std::endl;
+    }
 }
 
 void Game::loseLife() {
@@ -475,16 +618,31 @@ void Game::checkCollisions() {
     for (auto& obstacle : obstacles) {
         if (!obstacle->isActive()) continue;
         sf::Vector2f obstaclePos = obstacle->getPosition();
-        float dx = playerPos.x - obstaclePos.x;
-        float dy = playerPos.y - obstaclePos.y;
-        float dist = std::sqrt(dx*dx + dy*dy);
+        // Usa el rectángulo del jugador para calcular el punto más cercano al centro del aro
+        float pbLeft = player->getLeft();
+        float pbRight = player->getRight();
+        float pbTop = player->getTop();
+        float pbBottom = player->getBottom();
+        float closestX = std::clamp(obstaclePos.x, pbLeft, pbRight);
+        float closestY = std::clamp(obstaclePos.y, pbTop, pbBottom);
+        float ddx = obstaclePos.x - closestX;
+        float ddy = obstaclePos.y - closestY;
+        float distClosest = std::sqrt(ddx*ddx + ddy*ddy);
         if (obstacle->isHoop()) {
-            if (!obstacle->isPassed() && std::abs(playerPos.x - obstaclePos.x) < 8.0f && std::abs(playerPos.y - obstaclePos.y) < obstacle->getRadius()) {
-                obstacle->markPassed();
-                addScore(100);
+            // Considerar que pasa por el aro si el centro del jugador (aprox) entra en el área interior
+            if (!obstacle->isPassed()) {
+                float passThresh = obstacle->getRadius() * 0.9f; // aún más permisivo para reconocer paso por el centro
+                if (std::abs(playerPos.x - obstaclePos.x) < passThresh && std::abs(playerPos.y - obstaclePos.y) < passThresh) {
+                    obstacle->markPassed();
+                    addScore(100);
+                }
             }
         } else {
-            if (dist < obstacle->getRadius() + 25.0f) {
+            // Para el aro de fuego: causar daño solo si el punto más cercano del jugador está dentro del anillo (franja amarilla)
+            float r = obstacle->getRadius();
+            float ringWidth = std::max(2.0f, r * 0.02f); // radio de daño muy pequeño
+            if (distClosest >= (r - ringWidth) && distClosest <= (r + ringWidth)) {
+                std::cerr << "[DEBUG] Damage triggered: distClosest=" << distClosest << " r=" << r << " ringW=" << ringWidth << std::endl;
                 loseLife();
                 break;
             }
@@ -531,27 +689,28 @@ void Game::renderHUD() {
         ornament.setPosition(sf::Vector2f(scoreText.getPosition().x - 30.f, 6.f));
         window.draw(ornament);
         window.draw(scoreText);
-        // Mostrar texto "Lives:"
+        // Mostrar texto "Lifes:"
         if (hudLivesText) {
-            hudLivesText->setString("Lives:");
+            hudLivesText->setString("Lifes:");
             hudLivesText->setPosition(sf::Vector2f(10.f, 10.f));
             window.draw(*hudLivesText);
         }
-        // Dibujar iconos de vidas
-        float iconX = 80.f;
-        float iconY = 8.f;
-        for (int i = 0; i < lives; ++i) {
-            sf::Sprite lifeIcon(lifesTexture);
-            // Escala automática para que el alto sea 24px
-            float scale = 1.f;
-            if (lifesTexture.getSize().y > 0) scale = 24.f / lifesTexture.getSize().y;
-            lifeIcon.setScale(sf::Vector2f(scale, scale));
-            lifeIcon.setPosition(sf::Vector2f(iconX + i * (24.f + 8.f), iconY));
-            window.draw(lifeIcon);
+        // Dibujar iconos de lifes solo si la textura está cargada
+        if (lifesTexture.getSize().x > 0 && lifesTexture.getSize().y > 0) {
+            float iconX = 80.f;
+            float iconY = 8.f;
+            for (int i = 0; i < lives; ++i) {
+                sf::Sprite lifeIcon(lifesTexture);
+                // Escala automática para que el alto sea 24px
+                float scale = 24.f / lifesTexture.getSize().y;
+                lifeIcon.setScale(sf::Vector2f(scale, scale));
+                lifeIcon.setPosition(sf::Vector2f(iconX + i * (24.f + 8.f), iconY));
+                window.draw(lifeIcon);
+            }
         }
     } else if (font.getInfo().family != "") {
         if (hudLivesText) {
-            hudLivesText->setString(std::string("Lives: ") + std::to_string(lives));
+            hudLivesText->setString(std::string("Lifes: ") + std::to_string(lives));
             hudLivesText->setPosition(sf::Vector2f(10.f, 10.f));
             window.draw(*hudLivesText);
         }

@@ -19,6 +19,8 @@ enum class GameState {
 
 class Game {
     sf::Texture lifesTexture;
+        sf::Music menuMusic;
+        sf::Music levelMusic;
 private:
     sf::RenderWindow window;
     sf::View gameView;
@@ -47,6 +49,7 @@ private:
     float levelRight;
     sf::SoundBuffer jumpBuffer;
     sf::SoundBuffer hitBuffer;
+    std::unique_ptr<sf::Sound> jumpSound;
     sf::Music music;
     std::vector<sf::Sound> sounds;
     std::vector<sf::Text> menuOptions;

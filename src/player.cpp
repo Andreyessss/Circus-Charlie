@@ -94,7 +94,7 @@ void Player::moveRight() { velocity.x = speed; facing = 1.f; }
 void Player::stop() { velocity.x = 0.f; }
 void Player::jump() { if (canJump) { velocity.y = jumpForce; canJump = false; } }
 
-void Player::takeDamage() { isInvulnerable = true; invulnerableTimer = 2.0f; velocity.x = (facing > 0.f) ? -300.f : 300.f; velocity.y = -200.f; }
+void Player::takeDamage() { isInvulnerable = true; invulnerableTimer = 4.0f; velocity.x = (facing > 0.f) ? -300.f : 300.f; velocity.y = -200.f; }
 
 void Player::setTexture(const sf::Texture* tex) {
     if (tex && tex->getSize().x > 0) {
